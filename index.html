@@ -134,6 +134,16 @@ button:disabled{opacity:.5;cursor:default}
 .cform button{background:var(--ink);color:var(--paper);border:0;padding:0 12px;font-size:14px}
 .empty{color:var(--ink-soft);text-align:center;padding:20px;border:1px dashed var(--line);border-radius:6px;margin:0}
 .note{font-size:12px;color:var(--ink-soft);text-align:center;margin:0}
+
+/* 공유 링크로 들어온 사람에게 보여 주는 '친구의 감정서' */
+.friend{display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center}
+.friend .from{font-size:13px;font-weight:600;color:var(--seal);letter-spacing:.06em;margin:0}
+.friend .cardimg{box-shadow:0 10px 30px -14px rgba(60,40,20,.45)}
+.metoo{width:100%;background:var(--seal);color:#fff;border:0;padding:16px;font-size:18px;font-weight:700;letter-spacing:.04em;border-radius:6px;
+  animation:nudge 2.4s ease-in-out infinite}
+.metoo:hover{filter:brightness(1.08)}
+@keyframes nudge{0%,80%,100%{transform:none}88%{transform:scale(1.03)}94%{transform:scale(.99)}}
+@media (prefers-reduced-motion:reduce){.metoo{animation:none}}
 </style>
 </head>
 <body>
@@ -146,6 +156,18 @@ button:disabled{opacity:.5;cursor:default}
     <h1>전생 감정소</h1>
     <p class="sub">이름과 생년월일로 당신의 전생을 감정해 드립니다.</p>
   </header>
+
+  <section class="friend" id="friend" hidden aria-live="polite">
+    <p class="from" id="ffrom"></p>
+    <div class="reveal-head">
+      <p class="pre" id="fpre"></p>
+      <p class="title" id="ftitle"></p>
+      <span class="badge" id="fbadge"></span>
+    </div>
+    <img class="cardimg" id="fimg" alt="">
+    <button class="metoo" type="button" id="metoo">나도 감정받기</button>
+    <p class="hint">이름과 생년월일만 넣으면 바로 나와요.</p>
+  </section>
 
   <form class="panel" id="f" novalidate>
     <label for="name">이름
@@ -166,13 +188,6 @@ button:disabled{opacity:.5;cursor:default}
     </div>
     <img class="cardimg" id="cardimg" alt="전생 감정서 카드">
     <p class="hint">카드를 길게 눌러 사진으로 저장할 수 있어요.</p>
-    <div class="actions">
-      <button class="kakao wide" type="button" id="kakao">카카오톡으로 공유하기</button>
-      <button class="ghost" type="button" id="save">이미지 저장</button>
-      <button class="ghost" type="button" id="post">게시판에 올리기</button>
-    </div>
-    <p class="toast" id="toast"></p>
-
     <div class="mistake" id="mistakeBox">
       <span class="label">전생에서 했던 실수</span>
       <span class="caught" id="caught" hidden>실수 발각</span>
@@ -185,6 +200,13 @@ button:disabled{opacity:.5;cursor:default}
       </div>
       <button class="reveal" type="button" id="reveal">봉인 풀고 실수 보기</button>
     </div>
+
+    <div class="actions">
+      <button class="kakao wide" type="button" id="kakao">카카오톡으로 공유하기</button>
+      <button class="ghost" type="button" id="save">이미지 저장</button>
+      <button class="ghost" type="button" id="post">게시판에 올리기</button>
+    </div>
+    <p class="toast" id="toast"></p>
   </section>
 
   <section class="panel" id="board">
@@ -543,6 +565,24 @@ function reading(name,birth){
     no:String(h(key,97)%100000).padStart(5,"0")};
 }
 
+/* ---------- 공유 링크: 이름 + 결과만 담음 (생년월일은 넣지 않음) ---------- */
+function encodeShare(r,open){
+  const d=[r.name,LIVES.findIndex(x=>x[0]===r.life),ERAS.indexOf(r.era),PLACES.indexOf(r.place),LUCKS.indexOf(r.luck),r.no,open?1:0];
+  const bin=String.fromCharCode(...new TextEncoder().encode(JSON.stringify(d)));
+  return btoa(bin).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+function decodeShare(s){
+  try{
+    const bin=atob(s.replace(/-/g,"+").replace(/_/g,"/"));
+    const [name,li,ei,pi,ki,no,open]=JSON.parse(new TextDecoder().decode(Uint8Array.from(bin,c=>c.charCodeAt(0))));
+    const L=LIVES[li];if(!L||typeof name!=="string"||!name.trim())return null;
+    const [life,glyph,tier,desc,mistake,lesson]=L;
+    return {r:{key:"shared|"+s,name:name.trim().slice(0,12),life,glyph,tier,desc,mistake,lesson,
+      era:ERAS[ei]||ERAS[0],place:PLACES[pi]||PLACES[0],luck:LUCKS[ki]||LUCKS[0],no:String(no||"00000").slice(0,5)},open:!!open};
+  }catch(_){return null}
+}
+function shareUrl(){return SHARE_URL+"?r="+encodeShare(cur,revealed)}
+
 /* ---------- 카드 이미지 그리기 (1080×1350, 인스타 세로 비율) ---------- */
 function wrapLines(ctx,text,maxW){
   const out=[];let line="";
@@ -700,6 +740,7 @@ $("f").addEventListener("submit",async e=>{
   const go=e.submitter||document.querySelector(".go");go.disabled=true;
   SFX.start();
   await Promise.all([loading(),show(name,birth,false)]);
+  $("result").hidden=false;
   SFX.reveal(cur.tier);
   if(KAKAO_JS_KEY)uploadCard(); // 공유 버튼을 누르기 전에 미리 올려 둠
   $("result").scrollIntoView({behavior:"smooth",block:"start"});
@@ -780,7 +821,7 @@ $("kakao").addEventListener("click",async()=>{
       let img=kakaoImg.key===cardKey()?kakaoImg.url:null;
       if(!img){toast("카드 이미지를 준비하는 중이에요…");img=await Promise.race([uploadCard(),wait(2000).then(()=>null)])}
       toast(IS_MOBILE?"":"카카오톡 공유 창이 열렸어요. 카카오 계정으로 로그인하면 친구를 고를 수 있어요. 창이 안 보이면 주소창 오른쪽에서 팝업 차단을 해제해 주세요.");
-      const link={mobileWebUrl:SHARE_URL,webUrl:SHARE_URL};
+      const url=shareUrl(),link={mobileWebUrl:url,webUrl:url};
       Kakao.Share.sendDefault({
         objectType:"feed",
         content:{
@@ -796,10 +837,10 @@ $("kakao").addEventListener("click",async()=>{
   // 카카오 키가 없을 때: 휴대폰 공유창(카톡 포함)으로 카드 이미지와 문구를 함께 보냄
   try{
     const file=new File([cardBlob],`전생감정서_${cur.name}.png`,{type:"image/png"});
-    const data={files:[file],text:shareText()+"\n"+SHARE_URL};
+    const data={files:[file],text:shareText()+"\n"+shareUrl()};
     if(navigator.canShare&&navigator.canShare(data)){await navigator.share(data);return}
   }catch(e){if(e&&e.name==="AbortError")return}
-  const t=shareText()+"\n"+SHARE_URL;
+  const t=shareText()+"\n"+shareUrl();
   try{await navigator.clipboard.writeText(t);toast("공유 문구를 복사했어요. 카톡 대화방에 붙여 넣어 주세요.")}
   catch(_){toast("복사가 안 되는 환경이에요. 카드 이미지를 저장해서 보내 주세요.")}
 });
@@ -858,10 +899,36 @@ $("post").addEventListener("click",async()=>{
 });
 function hideBoard(){$("board").hidden=true;$("post").hidden=true;$("save").classList.add("wide")}
 
+/* 친구가 보낸 감정서 보여 주기 → '나도 감정받기'로 입력창 안내 */
+async function showFriend(fr){
+  const {r,open}=fr;
+  $("ffrom").textContent=`${r.name} 님이 전생 감정서를 보냈어요`;
+  $("fpre").textContent=`${r.name} 님의 전생은`;
+  $("ftitle").textContent=`${r.glyph} ${r.life}`;
+  const bd=$("fbadge");bd.textContent=(r.tier===3?"★ ":"")+RLABEL[r.tier]+" 전생";bd.className="badge b-"+r.tier;
+  const blob=await drawCard(r,open);
+  $("fimg").src=URL.createObjectURL(blob);
+  $("fimg").alt=`${r.name} 님의 전생 감정서: ${r.life} (${RLABEL[r.tier]})`;
+  $("friend").hidden=false;
+}
+$("metoo").addEventListener("click",()=>{
+  tone(660,0,.12,{vol:.08});tone(990,.08,.18,{vol:.08});
+  $("f").scrollIntoView({behavior:reduce?"auto":"smooth",block:"center"});
+  setTimeout(()=>$("name").focus({preventScroll:true}),reduce?0:450);
+});
+
 (async function init(){
-  let n="오스카",b="1988-07-14";
-  try{const s=JSON.parse(localStorage.getItem("pl-last")||"null");if(s&&s.name&&s.birth){n=s.name;b=s.birth;$("name").value=n;$("birth").value=b}}catch(_){}
+  let n="오스카",b="1988-07-14",stored=false;
+  try{const s=JSON.parse(localStorage.getItem("pl-last")||"null");if(s&&s.name&&s.birth){n=s.name;b=s.birth;$("name").value=n;$("birth").value=b;stored=true}}catch(_){}
+  const fr=decodeShare(new URLSearchParams(location.search).get("r")||"");
+  if(fr){
+    // 공유 링크로 온 사람: 친구 감정서를 먼저 보여 주고, 내 결과는 감정받은 뒤에 표시
+    $("result").hidden=true;
+    if(!stored){$("name").value="";$("name").placeholder="내 이름"}
+    await showFriend(fr);
+  }
   await show(n,b,false);
+  if(fr)$("result").hidden=true;
   if(KAKAO_JS_KEY)loadKakao(); // 공유 버튼을 누를 때 바로 열리도록 SDK 미리 불러옴
   if(!window.claude){hideBoard();return}
   db=await claude.use("db");
