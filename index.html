@@ -174,7 +174,7 @@ button:disabled{opacity:.5;cursor:default}
       <input id="name" autocomplete="off" maxlength="12" placeholder="예: 오스카" value="오스카">
     </label>
     <label for="birth">생년월일
-      <input id="birth" type="date" value="1988-07-14" min="1900-01-01" max="2026-12-31">
+      <input id="birth" type="text" inputmode="numeric" autocomplete="bday" maxlength="10" placeholder="숫자 8자리 (예: 19880714)" value="1988.07.14">
     </label>
     <p class="err" id="err" hidden></p>
     <button class="go" type="submit">전생 감정받기</button>
@@ -731,11 +731,27 @@ async function loading(){
   L.hidden=true;
 }
 
+/* ---------- 생년월일: 숫자 자판으로 8자리 입력 → 1988.07.14 형태로 자동 정리 ---------- */
+function fmtBirth(v){
+  const d=String(v).replace(/\D/g,"").slice(0,8);
+  return d.length>6?`${d.slice(0,4)}.${d.slice(4,6)}.${d.slice(6)}`:d.length>4?`${d.slice(0,4)}.${d.slice(4)}`:d;
+}
+function parseBirth(v){ // 올바른 날짜면 "YYYY-MM-DD"(감정 계산용), 아니면 null
+  const d=String(v).replace(/\D/g,"");if(d.length!==8)return null;
+  const y=+d.slice(0,4),m=+d.slice(4,6),dd=+d.slice(6),dt=new Date(y,m-1,dd);
+  if(y<1900||dt.getFullYear()!==y||dt.getMonth()!==m-1||dt.getDate()!==dd||dt>new Date())return null;
+  return `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6)}`;
+}
+$("birth").addEventListener("input",e=>{
+  const el=e.target;el.value=fmtBirth(el.value);
+  if(parseBirth(el.value)){$("err").hidden=true;el.blur()} // 8자리 다 치면 자판을 내려서 버튼이 보이게
+});
+
 $("f").addEventListener("submit",async e=>{
   e.preventDefault();
-  const name=$("name").value,birth=$("birth").value,err=$("err");
+  const name=$("name").value,birthRaw=$("birth").value,birth=parseBirth(birthRaw),err=$("err");
   if(!name.trim()){err.textContent="이름을 입력해 주세요.";err.hidden=false;$("name").focus();return}
-  if(!birth){err.textContent="생년월일을 선택해 주세요.";err.hidden=false;$("birth").focus();return}
+  if(!birth){err.textContent=birthRaw.trim()?"생년월일을 다시 확인해 주세요. 숫자 8자리로 넣어 주세요. (예: 19880714)":"생년월일을 숫자 8자리로 넣어 주세요. (예: 19880714)";err.hidden=false;$("birth").focus();return}
   err.hidden=true;document.activeElement&&document.activeElement.blur();
   const go=e.submitter||document.querySelector(".go");go.disabled=true;
   SFX.start();
@@ -938,7 +954,7 @@ $("metoo").addEventListener("click",()=>{
 
 (async function init(){
   let n="오스카",b="1988-07-14",stored=false;
-  try{const s=JSON.parse(localStorage.getItem("pl-last")||"null");if(s&&s.name&&s.birth){n=s.name;b=s.birth;$("name").value=n;$("birth").value=b;stored=true}}catch(_){}
+  try{const s=JSON.parse(localStorage.getItem("pl-last")||"null");if(s&&s.name&&s.birth){n=s.name;b=s.birth;$("name").value=n;$("birth").value=fmtBirth(b);stored=true}}catch(_){}
   const fr=decodeShare(new URLSearchParams(location.search).get("r")||"");
   if(fr){
     // 공유 링크로 온 사람: 친구 감정서를 먼저 보여 주고, 내 결과는 감정받은 뒤에 표시
