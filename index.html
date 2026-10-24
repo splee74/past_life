@@ -8,6 +8,11 @@
 <meta property="og:type" content="website">
 <meta property="og:title" content="전생 감정소 — 나의 전생은?">
 <meta property="og:description" content="이름과 생년월일로 당신의 전생을 감정해 드립니다. 전생에서 했던 실수까지!">
+<meta property="og:url" content="https://pastlife-alpha.vercel.app/">
+<meta property="og:image" content="https://pastlife-alpha.vercel.app/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#b8322a">
 <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
@@ -696,6 +701,7 @@ $("f").addEventListener("submit",async e=>{
   SFX.start();
   await Promise.all([loading(),show(name,birth,false)]);
   SFX.reveal(cur.tier);
+  if(KAKAO_JS_KEY)uploadCard(); // 공유 버튼을 누르기 전에 미리 올려 둠
   $("result").scrollIntoView({behavior:"smooth",block:"start"});
   const hd=$("rhead");hd.classList.remove("pop");void hd.offsetWidth;hd.classList.add("pop");
   go.disabled=false;
@@ -713,6 +719,7 @@ $("reveal").addEventListener("click",async()=>{
   for(let i=1;i<=full.length;i++){t.textContent=full.slice(0,i);if(!reduce&&i%2)SFX.tick();await wait(reduce?0:40)}
   $("mistakeLesson").hidden=false;$("mistakeLesson").classList.add("fadein");
   revealed=true;await paintCard();
+  if(KAKAO_JS_KEY)uploadCard();
   setTimeout(()=>box.classList.remove("burst"),900);
 });
 
@@ -744,12 +751,41 @@ function loadKakao(){
     setTimeout(()=>res(!!window.Kakao),4000);
   });
 }
+/* 지금 보고 있는 감정서 카드를 카카오 서버에 올려 공유 메시지 이미지로 씀 (실패하면 기본 미리보기 이미지) */
+const OG_IMAGE=location.origin+"/og-image.png";
+let kakaoImg={key:null,url:null,p:null};
+function cardKey(){return cur.key+"|"+revealed}
+function uploadCard(){
+  const k=cardKey(),blob=cardBlob;
+  if(kakaoImg.key===k&&kakaoImg.p)return kakaoImg.p;
+  kakaoImg={key:k,url:null,p:null};
+  kakaoImg.p=(async()=>{
+    if(!(await loadKakao())||!window.Kakao)return null;
+    if(!Kakao.isInitialized())Kakao.init(KAKAO_JS_KEY);
+    const res=await Kakao.Share.uploadImage({file:[new File([blob],"card.png",{type:"image/png"})]});
+    const url=res.infos.original.url;
+    if(kakaoImg.key===k)kakaoImg.url=url;
+    return url;
+  })().catch(()=>null);
+  return kakaoImg.p;
+}
 $("kakao").addEventListener("click",async()=>{
   const ok=await loadKakao();
   if(ok&&window.Kakao){
     try{
       if(!Kakao.isInitialized())Kakao.init(KAKAO_JS_KEY);
-      Kakao.Share.sendDefault({objectType:"text",text:shareText(),link:{mobileWebUrl:SHARE_URL,webUrl:SHARE_URL},buttonTitle:"내 전생 보기"});
+      let img=kakaoImg.key===cardKey()?kakaoImg.url:null;
+      if(!img){toast("카드 이미지를 준비하는 중이에요…");img=await uploadCard();toast("")}
+      const link={mobileWebUrl:SHARE_URL,webUrl:SHARE_URL};
+      Kakao.Share.sendDefault({
+        objectType:"feed",
+        content:{
+          title:`나의 전생은 "${cur.life}" ${cur.glyph}`,
+          description:`${RLABEL[cur.tier]} 전생 · `+(revealed?`전생의 실수: ${cur.mistake}`:"전생의 실수는 봉인되어 있어요 🔒"),
+          imageUrl:img||OG_IMAGE,imageWidth:img?1080:1200,imageHeight:img?1350:630,link
+        },
+        buttons:[{title:"내 전생 보기",link}]
+      });
       return;
     }catch(_){}
   }
@@ -822,6 +858,7 @@ function hideBoard(){$("board").hidden=true;$("post").hidden=true;$("save").clas
   let n="오스카",b="1988-07-14";
   try{const s=JSON.parse(localStorage.getItem("pl-last")||"null");if(s&&s.name&&s.birth){n=s.name;b=s.birth;$("name").value=n;$("birth").value=b}}catch(_){}
   await show(n,b,false);
+  if(KAKAO_JS_KEY)loadKakao(); // 공유 버튼을 누를 때 바로 열리도록 SDK 미리 불러옴
   if(!window.claude){hideBoard();return}
   db=await claude.use("db");
   const user=await claude.use("user");
