@@ -820,30 +820,49 @@ $("kakao").addEventListener("click",async()=>{
       if(!Kakao.isInitialized())Kakao.init(KAKAO_JS_KEY);
       let img=kakaoImg.key===cardKey()?kakaoImg.url:null;
       if(!img){toast("카드 이미지를 준비하는 중이에요…");img=await Promise.race([uploadCard(),wait(2000).then(()=>null)])}
-      toast(IS_MOBILE?"":"카카오톡 공유 창이 열렸어요. 카카오 계정으로 로그인하면 친구를 고를 수 있어요. 창이 안 보이면 주소창 오른쪽에서 팝업 차단을 해제해 주세요.");
+      toast("");
       const url=shareUrl(),link={mobileWebUrl:url,webUrl:url};
-      Kakao.Share.sendDefault({
-        objectType:"feed",
-        content:{
-          title:`나의 전생은 "${cur.life}" ${cur.glyph}`,
-          description:`${RLABEL[cur.tier]} 전생 · `+(revealed?`전생의 실수: ${cur.mistake}`:"전생의 실수는 봉인되어 있어요 🔒"),
-          imageUrl:img||OG_IMAGE,imageWidth:img?1080:1200,imageHeight:img?1350:630,link
-        },
-        buttons:[{title:"내 전생 보기",link}]
-      });
+      // PC에서는 SDK가 카카오 공유 팝업을 window.open으로 엶 → 팝업이 막혔는지 확인하려고 결과를 가로챔
+      const origOpen=window.open;let popup="unused";
+      window.open=function(...a){popup=origOpen.apply(window,a);return popup};
+      try{
+        Kakao.Share.sendDefault({
+          objectType:"feed",
+          content:{
+            title:`나의 전생은 "${cur.life}" ${cur.glyph}`,
+            description:`${RLABEL[cur.tier]} 전생 · `+(revealed?`전생의 실수: ${cur.mistake}`:"전생의 실수는 봉인되어 있어요 🔒"),
+            imageUrl:img||OG_IMAGE,imageWidth:img?1080:1200,imageHeight:img?1350:630,link
+          },
+          buttons:[{title:"내 전생 보기",link}]
+        });
+      }finally{window.open=origOpen}
+      if(!popup)throw new Error("popup blocked");
+      if(!IS_MOBILE)toast("카카오톡 공유 창이 열렸어요. 카카오 계정으로 로그인하면 친구를 고를 수 있어요.");
       return;
     }catch(_){}
   }
-  // 카카오 키가 없을 때: 휴대폰 공유창(카톡 포함)으로 카드 이미지와 문구를 함께 보냄
-  try{
-    const file=new File([cardBlob],`전생감정서_${cur.name}.png`,{type:"image/png"});
-    const data={files:[file],text:shareText()+"\n"+shareUrl()};
-    if(navigator.canShare&&navigator.canShare(data)){await navigator.share(data);return}
-  }catch(e){if(e&&e.name==="AbortError")return}
+  // 카카오 공유 창을 못 연 경우 — 휴대폰: 기본 공유창(카톡 포함)으로 카드 이미지와 문구를 함께 보냄
+  if(IS_MOBILE){
+    try{
+      const file=new File([cardBlob],`전생감정서_${cur.name}.png`,{type:"image/png"});
+      const data={files:[file],text:shareText()+"\n"+shareUrl()};
+      if(navigator.canShare&&navigator.canShare(data)){await navigator.share(data);return}
+    }catch(e){if(e&&e.name==="AbortError")return}
+  }
+  // PC 등: 공유 문구+링크를 복사 → 카톡 PC 대화방에 붙여 넣기
   const t=shareText()+"\n"+shareUrl();
-  try{await navigator.clipboard.writeText(t);toast("공유 문구를 복사했어요. 카톡 대화방에 붙여 넣어 주세요.")}
-  catch(_){toast("복사가 안 되는 환경이에요. 카드 이미지를 저장해서 보내 주세요.")}
+  if(await copyText(t))toast(IS_MOBILE?"공유 문구를 복사했어요. 카톡 대화방에 붙여 넣어 주세요."
+    :"이 브라우저에서 카카오 공유 창이 막혀서 공유 문구와 링크를 복사했어요. 카톡 PC 대화방에 붙여 넣기(Ctrl+V) 해 주세요. 주소창 오른쪽에서 팝업을 허용하면 공유 창으로도 보낼 수 있어요.");
+  else toast("복사가 안 되는 환경이에요. 카드 이미지를 저장해서 보내 주세요.");
 });
+async function copyText(t){
+  try{await navigator.clipboard.writeText(t);return true}catch(_){}
+  try{ // 클립보드 API가 막힌 브라우저(카톡 인앱 브라우저 등)용
+    const ta=document.createElement("textarea");ta.value=t;ta.setAttribute("readonly","");
+    ta.style.cssText="position:fixed;top:0;left:0;opacity:0";document.body.append(ta);ta.select();
+    const ok=document.execCommand("copy");ta.remove();return ok;
+  }catch(_){return false}
+}
 
 /* ---------- 게시판 + 댓글 (claude.ai 아티팩트에서만 공유 저장소 사용, 일반 웹에서는 숨김) ---------- */
 let db=null,me=null,posts=[],cmts={},openIds=new Set();
@@ -924,7 +943,7 @@ $("metoo").addEventListener("click",()=>{
   if(fr){
     // 공유 링크로 온 사람: 친구 감정서를 먼저 보여 주고, 내 결과는 감정받은 뒤에 표시
     $("result").hidden=true;
-    if(!stored){$("name").value="";$("name").placeholder="내 이름"}
+    $("name").value="";$("name").placeholder="내 이름";$("birth").value=""; // 이전 사람 정보 없이 빈칸으로 시작
     await showFriend(fr);
   }
   await show(n,b,false);
